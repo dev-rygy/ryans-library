@@ -10,7 +10,7 @@ namespace RyansLibrary
         public static void CreateDefaultFolders()
         {
             MkDir("Assets", "Art", "Input System", "Physic Materials", "Prefabs", "Scenes", "ScriptableObjects", "Scripts",
-                "Settings", "Tests", "URP");
+                "Tests", "URP");
             AssetDatabase.Refresh();
         }
 

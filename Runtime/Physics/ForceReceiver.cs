@@ -15,14 +15,15 @@ namespace RyansLibrary
     /// </summary>
     public class ForceReceiver : MonoBehaviour
     {
-        [field: Header("Falling and Grounded")]
-        [field: SerializeField] public float GravityMultiplier { get; private set; } = -9.81f;
-        [field: SerializeField] public float StaticVerticalVelocity { get; private set; } = -2f;
-        [SerializeField] private float _terminalVelocity = 50f;       // Highest velocity the player can reach
-        [field: SerializeField] public bool HasGravity { get; set; } = true;
+        [Header("Falling and Grounded")]
+        [SerializeField] private float _gravityMultiplier = -9.81f;
+        public float GravityMultiplier => _gravityMultiplier;
+        // Highest velocity the object can reach before being stopped by air resistance
+        [SerializeField] private float _terminalVelocity = 50f;
+        [SerializeField] public bool HasGravity = true;
 
         [field: Header("Grounded Check")]
-        [field: SerializeField] public bool EnableGroundCheck = true;
+        [SerializeField] public bool EnableGroundCheck = true;
         [SerializeField] private float _groundRayFanAngleX = 45;
         [SerializeField] private float _groundRayCount = 5;
         [SerializeField] private float _groundFanCheckDistance = 0.1f;
@@ -33,52 +34,39 @@ namespace RyansLibrary
         [SerializeField] private bool _log = false;
 
         // Individual velocities of the object
-        private float _velocityX;
+        private float _velocityX = 0;
         public float VelocityX => _velocityX;
-        private float _velocityY;
+        private float _velocityY = 0;
         public float VelocityY => _velocityY;
-        private float _velocityZ;
+        private float _velocityZ = 0;
         public float VelocityZ => _velocityZ;
 
-        private Vector3 _impact;
-        private Vector3 dampingVelocity;
+        private Vector3 _impact = Vector3.zero;
+        private Vector3 dampingVelocity = Vector3.zero;
         private float drag;
 
         public Vector3 Movement => _impact + Vector3.up * VelocityY;
-        //public bool IsGrounded() => _characterController.isGrounded;  // Character controllers ground check
+        private bool _isGrounded = false;
+        public bool IsGrounded => _isGrounded; // Character controllers ground check
 
-        public void Update()
+        private Transform _transform;
+
+        private void Awake()
         {
-            if (_log) Debug.Log("IsGrounded: " + IsGrounded());
+            _transform = GetComponent<Transform>();
+        }
 
-            if (_log) Debug.Log("ForceReciever Movement: " + Movement);
-
-            // Reduce any forces applied to the player a small bit every second
-            _impact = Vector3.SmoothDamp(_impact, Vector3.zero, ref dampingVelocity, drag);
+        private void Update()
+        {
+            if (_log) Debug.Log($"ForceReciever Movement: {Movement}");
 
             if (_log) Debug.Log("ForceReciever Impact: " + _impact);
 
-            if (_log) Debug.Log("Velocity Y: " + VelocityY);
+            HandleForces();
 
-            // Handle gravity below
-            if (!HasGravity)
-            {
-                _velocityY = 0;
-                return;
-            }
+            HandleGravity();
 
-            // Conditionally Handle Gravity; IsGrounded is unique to humanoid entities with a CharacterController
-            if (IsGrounded() && VelocityY < 0.0f)
-                _velocityY = StaticVerticalVelocity;                         // Does not have gravity
-            else
-            {
-                if (VelocityY > -(_terminalVelocity))   // If terminal velocity has not been reached
-                {
-                    _velocityY += GravityMultiplier * Time.deltaTime;        // Has gravity
-                }
-                else
-                    if (_log) Debug.Log("Terminal Velocity Reached");
-            }
+            _transform.position += new Vector3(_velocityX, _velocityY, _velocityZ) * Time.deltaTime;
         }
 
         public void AddForce(Vector3 force, float drag = 0.3f)
@@ -87,9 +75,42 @@ namespace RyansLibrary
             _impact += force;
         }
 
-        public bool IsGrounded()
+        private void HandleForces()
         {
-            if (!EnableGroundCheck) return false;
+            // Reduce any forces applied to the player a small bit every second
+            _impact = Vector3.SmoothDamp(_impact, Vector3.zero, ref dampingVelocity, drag);
+        }
+
+        private void HandleGravity()
+        {
+            if (!HasGravity)
+            {
+                _velocityY = 0;
+                return;
+            }
+
+            _isGrounded = CheckGrounded();
+            if (_log) Debug.Log("IsGrounded: " + _isGrounded);
+
+            // Conditionally Handle Gravity
+            if (_isGrounded && (VelocityY <= 0))
+                _velocityY = 0;                         // Does not have gravity
+            else
+            {
+                if (Mathf.Abs(VelocityY) >= _terminalVelocity)   // If terminal velocity has been reached
+                {
+                    if (_log) Debug.Log("Terminal Velocity Reached");
+                    return;
+                }
+
+                _velocityY += GravityMultiplier * Time.deltaTime;        // Calculate acceleration due to gravity 
+            }
+        }
+
+        private bool CheckGrounded()
+        {
+            if (!EnableGroundCheck)
+                return false;
 
             Vector3 rayOrigin = transform.position;
             RaycastHit hit;
@@ -100,7 +121,8 @@ namespace RyansLibrary
                 return true;
 
             float groundRayFanAngleY = 0;
-            float segmentedFanAngle = 360 / _groundRayCount;
+
+            float segmentedFanAngle = _groundRayCount <= 0 ? 0 : (360 / _groundRayCount);
 
             // Check all fan raycasts 
             for (int i = 0; i < _groundRayCount; i++)
