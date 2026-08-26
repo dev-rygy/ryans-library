@@ -7,7 +7,7 @@
 
 using UnityEngine;
 
-namespace RyansLibrary
+namespace RyansLibrary.Physics
 {
     /// <summary>
     /// Returns the movement when the forces are applied to an object. Essetially
@@ -15,6 +15,10 @@ namespace RyansLibrary
     /// </summary>
     public class ForceReceiver : MonoBehaviour
     {
+        [Header("Collision")]
+        private float _mass = 1.0f;
+        public float Mass => _mass;
+
         [Header("Falling and Grounded")]
         [SerializeField] private float _gravityMultiplier = -9.81f;
         public float GravityMultiplier => _gravityMultiplier;
@@ -33,19 +37,14 @@ namespace RyansLibrary
         [SerializeField] private bool _debug;
         [SerializeField] private bool _log = false;
 
-        // Individual velocities of the object
-        private float _velocityX = 0;
-        public float VelocityX => _velocityX;
-        private float _velocityY = 0;
-        public float VelocityY => _velocityY;
-        private float _velocityZ = 0;
-        public float VelocityZ => _velocityZ;
+        private Vector3 _velocity = Vector3.zero;
+        public Vector3 Velocity => _velocity;
 
         private Vector3 _impact = Vector3.zero;
         private Vector3 dampingVelocity = Vector3.zero;
-        private float drag;
+        private float _drag;
 
-        public Vector3 Movement => _impact + Vector3.up * VelocityY;
+        public Vector3 Movement => _impact + Vector3.up * _velocity.y;
         private bool _isGrounded = false;
         public bool IsGrounded => _isGrounded; // Character controllers ground check
 
@@ -56,7 +55,7 @@ namespace RyansLibrary
             _transform = GetComponent<Transform>();
         }
 
-        private void Update()
+        private void FixedUpdate()
         {
             if (_log) Debug.Log($"ForceReciever Movement: {Movement}");
 
@@ -66,26 +65,30 @@ namespace RyansLibrary
 
             HandleGravity();
 
-            _transform.position += new Vector3(_velocityX, _velocityY, _velocityZ) * Time.deltaTime;
+            _transform.position += _velocity * Time.deltaTime;
         }
 
         public void AddForce(Vector3 force, float drag = 0.3f)
         {
-            this.drag = drag;
+            _drag = drag;
             _impact += force;
         }
 
         private void HandleForces()
         {
             // Reduce any forces applied to the player a small bit every second
-            _impact = Vector3.SmoothDamp(_impact, Vector3.zero, ref dampingVelocity, drag);
+            _impact = Vector3.SmoothDamp(_impact, Vector3.zero, ref dampingVelocity, _drag);
+
+            _velocity.x = _impact.x;
+            _velocity.y = _impact.y;
+            _velocity.z = _impact.z;
         }
 
         private void HandleGravity()
         {
             if (!HasGravity)
             {
-                _velocityY = 0;
+                _velocity.y = 0;
                 return;
             }
 
@@ -93,17 +96,17 @@ namespace RyansLibrary
             if (_log) Debug.Log("IsGrounded: " + _isGrounded);
 
             // Conditionally Handle Gravity
-            if (_isGrounded && (VelocityY <= 0))
-                _velocityY = 0;                         // Does not have gravity
+            if (_isGrounded && (_velocity.y <= 0))
+                _velocity.y = 0;        // Does not have gravity
             else
             {
-                if (Mathf.Abs(VelocityY) >= _terminalVelocity)   // If terminal velocity has been reached
+                if (Mathf.Abs(_velocity.y) >= _terminalVelocity)   // If terminal velocity has been reached
                 {
                     if (_log) Debug.Log("Terminal Velocity Reached");
                     return;
                 }
 
-                _velocityY += GravityMultiplier * Time.deltaTime;        // Calculate acceleration due to gravity 
+                _velocity.y += GravityMultiplier * Time.deltaTime;      // Calculate acceleration due to gravity
             }
         }
 
@@ -117,7 +120,7 @@ namespace RyansLibrary
 
             if (_debug) Debug.DrawRay(rayOrigin, Vector3.down * _groundDownCheckDistance, Color.red);
             // Check the first raycast
-            if (Physics.Raycast(rayOrigin, Vector3.down, out hit, _groundDownCheckDistance))
+            if (UnityEngine.Physics.Raycast(rayOrigin, Vector3.down, out hit, _groundDownCheckDistance))
                 return true;
 
             float groundRayFanAngleY = 0;
@@ -132,7 +135,7 @@ namespace RyansLibrary
 
                 if (_debug) Debug.DrawRay(rayOrigin, rayDirection * _groundFanCheckDistance, Color.red);
 
-                if (Physics.Raycast(rayOrigin, rayDirection, out hit, _groundFanCheckDistance))
+                if (UnityEngine.Physics.Raycast(rayOrigin, rayDirection, out hit, _groundFanCheckDistance))
                     return true;
 
                 groundRayFanAngleY += segmentedFanAngle;
