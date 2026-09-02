@@ -117,7 +117,10 @@ namespace RyansLibrary.Physics
 
             // If the sphere's centre is outside the box
             if (surfaceDistance > Mathf.Epsilon)
+            {
                 normal = normalBallToWall / surfaceDistance;
+                return;
+            }
 
             // *** Scenario 2: The sphere's centre is inside the box, so ClosestPoint returns the centre itself.
             // Fall back to the nearest face - measure how deep the centre sits on each local axis and escape through the shallowest.
