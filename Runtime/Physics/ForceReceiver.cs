@@ -15,9 +15,30 @@ namespace RyansLibrary.Physics
     /// </summary>
     public class ForceReceiver : MonoBehaviour
     {
+        private enum ForceReceiverType
+        {
+            Static,
+            Dynamic,
+        }
+
         [Header("Collision")]
-        private float _mass = 1.0f;
-        public float Mass => _mass;
+        // Clamp mass above zero: a zero mass would divide by zero in the collision maths.
+        [SerializeField, Min(0.0001f)] private float _mass = 1.0f;
+        [SerializeField] private ForceReceiverType _type = ForceReceiverType.Dynamic;
+
+        /// <summary>
+        /// A static receiver is immovable, which in collision maths is identical to having
+        /// infinite mass. Reporting it that way lets the elastic collision formula resolve
+        /// static and dynamic bodies through the same code path, with no special casing.
+        /// </summary>
+        public float Mass => (_type == ForceReceiverType.Static) ? float.PositiveInfinity : _mass;
+
+        [Header("Movement")]
+        // True when this object is immovable and absorbs any force applied to it.
+        public bool IsStatic => (_type == ForceReceiverType.Static);
+        [SerializeField] private bool _constrainX = false;
+        [SerializeField] private bool _constrainY = false;
+        [SerializeField] private bool _constrainZ = false;
 
         [Header("Falling and Grounded")]
         [SerializeField] private float _gravityMultiplier = -9.81f;
@@ -61,15 +82,26 @@ namespace RyansLibrary.Physics
 
             if (_log) Debug.Log("ForceReciever Impact: " + _impact);
 
+            if (_type == ForceReceiverType.Static)
+                return;
+
             HandleForces();
 
             HandleGravity();
+
+            HandleConstraints();
 
             _transform.position += _velocity * Time.deltaTime;
         }
 
         public void AddForce(Vector3 force, float drag = 0.3f)
         {
+            // A static receiver is immovable, so it absorbs anything that hits it. Dropping
+            // the force here rather than in FixedUpdate keeps _impact from banking hits that
+            // would all be released at once if the type ever flipped to Dynamic.
+            if (IsStatic)
+                return;
+
             _drag = drag;
             _impact += force;
         }
@@ -142,6 +174,18 @@ namespace RyansLibrary.Physics
             }
 
             return false;
+        }
+
+        private void HandleConstraints()
+        {
+            if (_constrainX)
+                _velocity.x = 0;
+
+            if (_constrainY)
+                _velocity.y = 0;
+
+            if (_constrainZ)
+                _velocity.z = 0;
         }
     }
 }

@@ -75,11 +75,12 @@ namespace RyansLibrary.Physics
 
                 if (effectedCollider is SphereCollider effectedSphereCollider)   //  Sphere + Sphere collision
                 {
-                    Vector3 effectedCenter = effectedSphereCollider.bounds.center; // Convert center to world space
-                    Vector3 normal = (effectedCenter - effectorCenter).normalized;
-
-                    //StartCoroutine(HandleSphereCollision(effectorSphereCollider, effectedSphereCollider));
                     _onCollision?.Invoke(effectorSphereCollider, effectedSphereCollider);
+                }
+
+                if (effectedCollider is BoxCollider effectedBoxCollider)   //  Sphere + Box collision
+                {
+                    _onCollision?.Invoke(effectorSphereCollider, effectedBoxCollider);
                 }
             }
         }
