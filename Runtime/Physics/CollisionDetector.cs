@@ -4,6 +4,7 @@
  * Last Modified:   09/02/2026 (Ryan)
  * Notes:           Detects collisions with other objects
 */
+using System;
 using UnityEngine;
 using UnityEngine.Events;
 
@@ -41,7 +42,8 @@ namespace RyansLibrary.Physics
         {
             _collider = GetComponent<Collider>();
             _forceReceiver = GetComponent<ForceReceiver>();
-            _previousPosition = transform.position;
+
+            _previousPosition = (_collider is SphereCollider sphere) ? transform.TransformPoint(sphere.center) : transform.position;
         }
 
         private void FixedUpdate()
@@ -75,54 +77,53 @@ namespace RyansLibrary.Physics
         /// <param name="effectorSphereCollider">The collider this script is attached to.</param>
         private void CheckCollision(SphereCollider effectorSphereCollider)
         {
-            Collider[] collisions;
-
             // If object has movement then use continuous collision detection
-            Vector3 effectorCenter = effectorSphereCollider.bounds.center; // Convert center to world space
+            // Centre from the transform, not Collider.bounds, so it matches the reactor and reflects any push made earlier this step
+            Vector3 effectorCenter = transform.TransformPoint(effectorSphereCollider.center); // Convert center to world space
             Vector3 movement = effectorCenter - _previousPosition;
             float distance = movement.magnitude;
 
             switch (_detectionType)
             {
                 case CollisionCheckType.Discrete:
-                    collisions = DiscreteSphereCollisionCheck(effectorCenter, effectorSphereCollider.radius);
+                    DiscreteSphereCollisionCheck(effectorSphereCollider, effectorCenter);
                     break;
                 case CollisionCheckType.Continuous:
-                    collisions = ContinuousSphereCollisionCheck(effectorCenter, effectorSphereCollider.radius, movement, distance);
+                    ContinuousSphereCollisionCheck(effectorSphereCollider, effectorCenter, movement, distance);
                     break;
                 case CollisionCheckType.Dynamic:
                     if (distance > movementDetectPrecision)
                     {
                         // Continuous collision detection if balls are close
-                        collisions = ContinuousSphereCollisionCheck(effectorCenter, effectorSphereCollider.radius, movement, distance);
+                        ContinuousSphereCollisionCheck(effectorSphereCollider, effectorCenter, movement, distance);
                     }
                     else
                     {
                         // Half-asleep - balls that are not moving, so use discrete collision detection to save CPU cycles.
-                        collisions = DiscreteSphereCollisionCheck(effectorCenter, effectorSphereCollider.radius);
+                        DiscreteSphereCollisionCheck(effectorSphereCollider, effectorCenter);
                     }
                     break;
                 default:
-                    collisions = DiscreteSphereCollisionCheck(effectorCenter, effectorSphereCollider.radius);
+                    DiscreteSphereCollisionCheck(effectorSphereCollider, effectorCenter);
                     break;
             }
+        }
 
-            foreach (Collider effectedCollider in collisions)
+        private void InvokeCollision(SphereCollider effectorSphereCollider, Collider effectedCollider)
+        {
+            if (effectedCollider == _collider)      // Prevent object from colliding with itself
+                return;
+
+            if (effectedCollider is SphereCollider effectedSphereCollider)   //  Sphere + Sphere collision
             {
-                if (effectedCollider == _collider)      // Prevent object from colliding with itself
-                    continue;
+                _onCollision?.Invoke(effectorSphereCollider, effectedSphereCollider);
+                if (_debug) Debug.Log($"Collision detected between {effectorSphereCollider.name} and {effectedSphereCollider.name}");
+            }
 
-                if (effectedCollider is SphereCollider effectedSphereCollider)   //  Sphere + Sphere collision
-                {
-                    _onCollision?.Invoke(effectorSphereCollider, effectedSphereCollider);
-                    if (_debug) Debug.Log($"Collision detected between {effectorSphereCollider.name} and {effectedSphereCollider.name}");
-                }
-
-                if (effectedCollider is BoxCollider effectedBoxCollider)   //  Sphere + Box collision
-                {
-                    _onCollision?.Invoke(effectorSphereCollider, effectedBoxCollider);
-                    if (_debug) Debug.Log($"Collision detected between {effectorSphereCollider.name} and {effectedBoxCollider.name}");
-                }
+            if (effectedCollider is BoxCollider effectedBoxCollider)   //  Sphere + Box collision
+            {
+                _onCollision?.Invoke(effectorSphereCollider, effectedBoxCollider);
+                if (_debug) Debug.Log($"Collision detected between {effectorSphereCollider.name} and {effectedBoxCollider.name}");
             }
         }
 
@@ -131,28 +132,69 @@ namespace RyansLibrary.Physics
             // TODO: Implement box collision detection
         }
 
-        private Collider[] ContinuousSphereCollisionCheck(Vector3 center, float radius, Vector3 movement, float distance)
+        private void ContinuousSphereCollisionCheck(SphereCollider effectorSphereCollider, Vector3 center, Vector3 movement, float distance)
         {
-            Collider[] collisions;
+            // Sweep from where the ball was last tick to where it is now
+            Vector3 direction = movement / distance;
+            RaycastHit[] hits = UnityEngine.Physics.SphereCastAll(_previousPosition, effectorSphereCollider.radius, direction, distance);
 
-            // Sweep from where the ball was last tick to where it is now, so a fast-moving
-            // ball can't tunnel through another between two discrete position samples.
-            RaycastHit[] hits = UnityEngine.Physics.SphereCastAll(_previousPosition, radius, movement.normalized, distance);
-            collisions = new Collider[hits.Length];
-            for (int i = 0; i < hits.Length; i++)
+            // Sort hits by nearest first as the first contact along the sweep is the one that actually happened
+            Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
+
+            Vector3 velocityAtStart = _forceReceiver.Velocity;
+            Vector3 finalCenter = center;
+
+            // Pass 1: contacts already touching at the start of the sweep; resolve them where the ball is now
+            foreach (RaycastHit hit in hits)
             {
-                collisions[i] = hits[i].collider;
+                if (hit.collider != _collider && hit.distance <= 0f)
+                    InvokeCollision(effectorSphereCollider, hit.collider);
             }
 
-            _previousPosition = center;
+            // If any of those changed this ball's velocity, the sweep path is out of date, so don't move back along it
+            if (_forceReceiver.Velocity != velocityAtStart)
+            {
+                _previousPosition = center;
+                return;
+            }
 
-            return collisions;
+            // Pass 2: the nearest contact along the sweep that the reactor actually resolves
+            foreach (RaycastHit hit in hits)
+            {
+                if (hit.collider == _collider || hit.distance <= 0f)
+                    continue;
+
+                // Resolving from the end-of-step position gets the contact normal wrong once the ball
+                // has passed the other's centre, so move back to where the contact happened first.
+                Vector3 originalPosition = transform.position;
+                Vector3 contactCenter = _previousPosition + direction * hit.distance;
+                transform.position += contactCenter - center;
+
+                InvokeCollision(effectorSphereCollider, hit.collider);
+
+                // The reactor changes velocity when it resolves a hit, so a change means it acted:
+                // stay at the contact point and ignore the rest of the sweep.
+                if (_forceReceiver.Velocity != velocityAtStart)
+                {
+                    finalCenter = contactCenter;
+                    break;
+                }
+
+                // Nothing resolved (e.g. the other object was moving away, or has no ForceReceiver),
+                // so put the ball back and keep checking.
+                transform.position = originalPosition;
+            }
+
+            _previousPosition = finalCenter;
         }
 
-        private Collider[] DiscreteSphereCollisionCheck(Vector3 center, float radius)
+        private void DiscreteSphereCollisionCheck(SphereCollider effectorSphereCollider, Vector3 center)
         {
             // Ball didn't move this tick; a swept check needs a direction, so fall back to a stationary overlap check.
-            return UnityEngine.Physics.OverlapSphere(center, radius);
+            foreach (Collider effectedCollider in UnityEngine.Physics.OverlapSphere(center, effectorSphereCollider.radius))
+                InvokeCollision(effectorSphereCollider, effectedCollider);
+
+            _previousPosition = center;
         }
     }
 }

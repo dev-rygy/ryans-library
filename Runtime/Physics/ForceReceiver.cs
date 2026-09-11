@@ -96,14 +96,26 @@ namespace RyansLibrary.Physics
 
         public void AddForce(Vector3 force, float drag = 0.3f)
         {
-            // A static receiver is immovable, so it absorbs anything that hits it. Dropping
-            // the force here rather than in FixedUpdate keeps _impact from banking hits that
-            // would all be released at once if the type ever flipped to Dynamic.
+            // A static receiver is immovable, so it absorbs anything that hits it
             if (IsStatic)
                 return;
 
             _drag = drag;
             _impact += force;
+        }
+
+        /// <summary>
+        /// Same as AddForce, but Velocity reflects the change straight away instead of on the next
+        /// FixedUpdate.
+        /// </summary>
+        public void AddImpulse(Vector3 force, float drag = 0.3f)
+        {
+            // A static receiver is immovable, so it absorbs anything that hits it
+            if (IsStatic)
+                return;
+
+            AddForce(force, drag);
+            _velocity += force;
         }
 
         private void HandleForces()

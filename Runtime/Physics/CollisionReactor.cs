@@ -36,32 +36,51 @@ namespace RyansLibrary.Physics
             if (fRA == null || fRB == null)
                 return;
 
+            // The faster ball resolves the collision of both balls
+            if (!IsResolvingSide(fRA, fRB))
+                return;
+
             // Extract parameters from force recievers; mass is infinite for static objects
-            Vector3 centerA = sphereA.bounds.center; // Convert center to world space
-            Vector3 centerB = sphereB.bounds.center;
+            Vector3 centerA = sphereA.transform.TransformPoint(sphereA.center);
+            Vector3 centerB = sphereB.transform.TransformPoint(sphereB.center);
             float mA = fRA.Mass;
             float mB = fRB.Mass;
-            Vector3 vA = fRA.Velocity;
-            Vector3 vB = fRB.Velocity;
+            Vector3 vAI = fRA.Velocity;     // Initial Velocity of A
+            Vector3 vBI = fRB.Velocity;     // Initial Velocity of B
             Vector3 normal = (centerB - centerA).normalized;
 
             // Skip resolution if the objects are already separating or stationary
-            if (IsMovingAway(vA, vB, normal))
+            if (IsMovingAway(vAI, vBI, normal))
                 return;
 
-            // Final Velocity
-            Vector3 vF = Vector3.zero;
-
-            // Calculate elastic collision
+            // ***** Handle object A's collision
+            // Calculate elastic collision for both balls from their pre-collision velocities
             // Simplify calculation of velocity if masses are equal; velocity exchange
-            vF = (mA == mB) ? ElasticCollision(vA, vB, normal) : ElasticCollision(mA, mB, vA, vB, normal);
+            Vector3 vAF = (mA == mB) ? ElasticCollision(vAI, vBI, normal) : ElasticCollision(mA, mB, vAI, vBI, normal);
 
-            fRA.AddForce(vF - fRA.Velocity);
+            fRA.AddImpulse(vAF - vAI);
+
+            // ***** Handle object B's collision
+            if (!fRB.IsStatic)      // If object B is static then do not perform collision logic
+            {
+                Vector3 vBF = (mA == mB) ? ElasticCollision(vBI, vAI, normal) : ElasticCollision(mB, mA, vBI, vAI, normal);
+                fRB.AddImpulse(vBF - vBI);
+            }
 
             // Push the spheres apart by their overlap so they don't remain in contact
-            float intersection = (sphereA.radius + sphereB.radius) - Vector3.Distance(sphereA.bounds.center, sphereB.bounds.center);
+            float intersection = (sphereA.radius + sphereB.radius) - Vector3.Distance(centerA, centerB);
             if (intersection > 0)
-                sphereA.transform.position -= normal * (intersection * 0.5f);
+            {
+                if (fRB.IsStatic)   // If object B is static then only move object A
+                {
+                    sphereA.transform.position -= normal * intersection;
+                }
+                else
+                {
+                    sphereA.transform.position -= normal * (intersection * 0.5f);
+                    sphereB.transform.position += normal * (intersection * 0.5f);
+                }
+            }
         }
 
         /// <summary>
@@ -83,7 +102,7 @@ namespace RyansLibrary.Physics
 
             // Unlike two spheres, the contact normal depends on which face of the box the
             // sphere is nearest, so it has to be derived from the box geometry.
-            GetSphereBoxContactNormal(box, sphere.bounds.center, out Vector3 normal, out float surfaceDistance);
+            GetSphereBoxContactNormal(box, sphere.transform.TransformPoint(sphere.center), out Vector3 normal, out float surfaceDistance);
 
             // Skip resolution if the objects are already separating or stationary
             if (IsMovingAway(vA, vB, normal))
@@ -96,7 +115,7 @@ namespace RyansLibrary.Physics
             // Simplify calculation of velocity if masses are equal; velocity exchange
             vF = (mA == mB) ? ElasticCollision(vA, vB, normal) : ElasticCollision(mA, mB, vA, vB, normal);
 
-            fRA.AddForce(vF - vA);
+            fRA.AddImpulse(vF - vA);
 
             // Push the sphere and box apart by their overlap so they don't remain in contact
             float intersection = sphere.radius - surfaceDistance;
@@ -208,6 +227,21 @@ namespace RyansLibrary.Physics
             Vector3 vAnf = vBn;
 
             return vAnf + vAt;
+        }
+
+        /// <summary>
+        /// True if A's detector should resolve the A/B pair: the faster of the two, with a
+        /// tie-break so exactly one side acts when their speeds are equal.
+        /// </summary>
+        private bool IsResolvingSide(ForceReceiver a, ForceReceiver b)
+        {
+            float speedA = a.Velocity.sqrMagnitude;
+            float speedB = b.Velocity.sqrMagnitude;
+
+            if (speedA != speedB)
+                return speedA > speedB;
+
+            return a.GetInstanceID() < b.GetInstanceID();
         }
 
         private bool IsMovingAway(Vector3 vA, Vector3 vB, Vector3 normal)
